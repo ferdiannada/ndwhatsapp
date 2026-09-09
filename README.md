@@ -12,15 +12,16 @@
 
 ## 🌟 Fitur Utama
 
-### 1. 🔬 Reverse Engineering & Developer Suite
-- **Remote WebKit Inspector Server**: Berjalan otomatis di `http://127.0.0.1:9222`. Anda dapat membuka browser Chromium/Chrome atau Edge, mengetikkan URL tersebut, dan melakukan visual debugging penuh terhadap DOM, Network WebSocket, Console, dan Memory Heap WhatsApp Web.
-- **`window.ndWA` & `window.WA` Store Hook**: Otomatis menyusup ke dalam chunk loader Webpack WhatsApp Web (`webpackChunkwhatsapp_web_client`) dan mengekstrak modul-modul internal penting:
+### 1. 🔬 Reverse Engineering & Developer Suite (Mode `--debug`)
+- **Aman Secara Default**: Secara default, ndWhatsApp berjalan dalam mode *Hardened Production* tanpa port terbuka.
+- **Remote WebKit Inspector Server**: Diaktifkan saat dijalankan dengan `./ndwhatsapp --debug` di `http://127.0.0.1:9222`. Anda dapat membuka browser Chromium/Chrome atau Edge, mengetikkan URL tersebut, dan melakukan visual debugging penuh terhadap DOM, Network WebSocket, Console, dan Memory Heap WhatsApp Web.
+- **`window.ndWA` & `window.WA` Store Hook (Debug Mode)**: Saat mode `--debug` aktif, aplikasi menyusup ke dalam chunk loader Webpack WhatsApp Web (`webpackChunkwhatsapp_web_client`) dan mengekstrak modul-modul internal penting:
   - `WA.Store.Msg` — Koleksi dan model pesan.
   - `WA.Store.Chat` — Model obrolan aktif, unread count, dan pin status.
   - `WA.Store.Contact` — Kontak WhatsApp, nomor telepon, dan status profil.
   - `WA.Store.Conn` — Status konektivitas dan informasi akun login.
   - `WA.Store.Socket` — Socket channel dan state transport Noise Protocol.
-- **In-App DevTools HUD (`Ctrl + Shift + D` / `F12`)**: Panel instrumen mengambang (*floating HUD*) di dalam aplikasi untuk memantau:
+- **In-App DevTools HUD (`Ctrl + Shift + D` / `F12`)**: Panel instrumen mengambang (*floating HUD*) aktif di mode debug untuk memantau:
   - **Metrics**: PID proses, alokasi memori Go runtime, jumlah goroutine.
   - **Store**: Daftar obrolan aktif beserta JID dan unread count.
   - **Live Events**: Stream pesan masuk secara real-time (`Store.Msg.on('add')`).
@@ -63,7 +64,7 @@
 
 ## 🛠️ Panduan RE Console API (`window.ndWA`)
 
-Buka Remote Inspector di `http://127.0.0.1:9222` atau tekan `F12` / `Ctrl+Shift+D` untuk membuka tab *Run JS*. Anda dapat mengeksekusi perintah berikut:
+Jalankan aplikasi dengan flag debug (`./ndwhatsapp --debug`), lalu buka Remote Inspector di `http://127.0.0.1:9222` atau tekan `F12` / `Ctrl+Shift+D` untuk membuka tab *Run JS*. Anda dapat mengeksekusi perintah berikut:
 
 ```javascript
 // 1. Dapatkan semua model obrolan

@@ -196,9 +196,41 @@ func openFolderInFileManager(folderPath string) error {
 	return nil
 }
 
+var safePreviewExtensions = map[string]bool{
+	".pdf":  true,
+	".txt":  true,
+	".csv":  true,
+	".rtf":  true,
+	".png":  true,
+	".jpg":  true,
+	".jpeg": true,
+	".gif":  true,
+	".webp": true,
+	".doc":  true,
+	".docx": true,
+	".xls":  true,
+	".xlsx": true,
+	".ppt":  true,
+	".pptx": true,
+}
+
+func isSafePreviewExtension(filename string) bool {
+	ext := strings.ToLower(filepath.Ext(filename))
+	return safePreviewExtensions[ext]
+}
+
+func getPreviewDir() string {
+	return filepath.Join(os.TempDir(), "ndwhatsapp-preview")
+}
+
 func previewDocument(filename, dataURI string) (string, error) {
-	tempDir := filepath.Join(os.TempDir(), "WhatsAppDeskPreview")
-	_ = os.MkdirAll(tempDir, 0755)
+	if !isSafePreviewExtension(filename) {
+		return "", fmt.Errorf("tipe berkas tidak diizinkan untuk pratinjau otomatis demi keamanan: %s", filepath.Ext(filename))
+	}
+
+	tempDir := getPreviewDir()
+	_ = os.MkdirAll(tempDir, 0700)
+	_ = os.Chmod(tempDir, 0700)
 
 	targetPath, err := saveDownloadedFileToDir(tempDir, filename, dataURI)
 	if err != nil {
@@ -224,6 +256,9 @@ func openFileInDefaultApp(filePath string) bool {
 	if filePath == "" {
 		return false
 	}
+	if !isSafePreviewExtension(filePath) {
+		return false
+	}
 	if _, err := os.Stat(filePath); err != nil {
 		return false
 	}
@@ -244,7 +279,7 @@ func openFileInDefaultApp(filePath string) bool {
 }
 
 func cleanupPreviewDir() {
-	tempDir := filepath.Join(os.TempDir(), "WhatsAppDeskPreview")
+	tempDir := getPreviewDir()
 	_ = os.RemoveAll(tempDir)
 }
 

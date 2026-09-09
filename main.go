@@ -1,6 +1,11 @@
 package main
 
-import "runtime"
+import (
+	"flag"
+	"runtime"
+)
+
+var debugMode bool
 
 const (
 	windowWidth  = 1100
@@ -21,7 +26,7 @@ func getInitScript(ua string) string {
 		clientArch = "x86"
 	}
 
-	return `
+	baseScript := `
 		// UserAgent and platform override to Google Chrome
 		Object.defineProperty(navigator, 'userAgent', {
 			get: () => '` + ua + `'
@@ -170,7 +175,7 @@ func getInitScript(ua string) string {
 							if (node.nodeType === 1) {
 								if (node.tagName === 'VIDEO' || node.tagName === 'AUDIO') {
 									prepareMedia(node);
-								} else if (node.querySelectorAll) {
+								} else if (node.getElementsByTagName && (node.getElementsByTagName('video').length > 0 || node.getElementsByTagName('audio').length > 0)) {
 									var list = node.querySelectorAll('video, audio');
 									for (var l = 0; l < list.length; l++) {
 										prepareMedia(list[l]);
@@ -936,7 +941,7 @@ func getInitScript(ua string) string {
 			return origWindowOpen.apply(this, arguments);
 		};
 
-		// Zoom Keyboard Shortcuts (Cmd + / Cmd - / Cmd 0)
+		// Zoom Keyboard Shortcuts (Cmd + / Cmd - / Cmd 0) & Touchpad Pinch-to-Zoom Interceptor
 		(function() {
 			var currentZoom = 1.0;
 			window.addEventListener('keydown', function(e) {
@@ -956,6 +961,72 @@ func getInitScript(ua string) string {
 					}
 				}
 			});
+
+			// Bridge for native touchpad pinch events dispatched from GTK Cgo layer
+			window.__onNativeTouchpadPinch = function(deltaScale, clientX, clientY) {
+				var viewer = document.querySelector('[data-testid="media-viewer"]');
+				if (!viewer) return;
+
+				var target = document.elementFromPoint(clientX, clientY) || viewer;
+				if (!viewer.contains(target)) {
+					target = viewer.querySelector('img') || viewer;
+				}
+
+				// deltaScale > 0 means zoom in (wheel deltaY < 0), deltaScale < 0 means zoom out (wheel deltaY > 0)
+				var wheelDelta = deltaScale > 0 ? -120 : 120;
+				var cleanWheel = new WheelEvent('wheel', {
+					bubbles: true,
+					cancelable: true,
+					view: window,
+					clientX: clientX,
+					clientY: clientY,
+					screenX: clientX,
+					screenY: clientY,
+					deltaX: 0,
+					deltaY: wheelDelta,
+					deltaZ: 0,
+					deltaMode: 0
+				});
+				target.dispatchEvent(cleanWheel);
+			};
+
+			// Intercept touchpad pinch-to-zoom (wheel with ctrlKey or gesture events)
+			// to prevent full-window viewport zoom, and redirect zoom directly to WhatsApp's media viewer image!
+			window.addEventListener('wheel', function(e) {
+				if (e.ctrlKey) {
+					e.preventDefault();
+
+					var viewer = document.querySelector('[data-testid="media-viewer"]');
+					if (viewer && viewer.contains(e.target)) {
+						var target = e.target;
+						var delta = e.deltaY;
+						if (delta === 0 && e.deltaX !== 0) {
+							delta = e.deltaX;
+						}
+
+						// Dispatch a clean synthetic wheel event WITHOUT ctrlKey to WhatsApp's image viewer
+						var cleanWheel = new WheelEvent('wheel', {
+							bubbles: true,
+							cancelable: true,
+							view: window,
+							clientX: e.clientX,
+							clientY: e.clientY,
+							screenX: e.screenX,
+							screenY: e.screenY,
+							deltaX: 0,
+							deltaY: delta,
+							deltaZ: 0,
+							deltaMode: e.deltaMode || 0
+						});
+						target.dispatchEvent(cleanWheel);
+					}
+				}
+			}, { passive: false });
+
+			// Block WebKit native gesture zooming on entire page
+			window.addEventListener('gesturestart', function(e) { e.preventDefault(); }, { passive: false });
+			window.addEventListener('gesturechange', function(e) { e.preventDefault(); }, { passive: false });
+			window.addEventListener('gestureend', function(e) { e.preventDefault(); }, { passive: false });
 		})();
 
 		// Dock Badge Unread Count Synchronizer
@@ -1192,16 +1263,14 @@ func getInitScript(ua string) string {
 				'#app > div, #app .two { width: 100% !important; height: 100% !important; min-width: 0 !important; max-width: 100% !important; top: 0 !important; margin: 0 !important; border-radius: 0 !important; }' +
 				'[data-testid="status-v3"] { min-width: 0 !important; width: 100% !important; height: 100% !important; }' +
 				'@media screen and (min-width: 641px) {' +
-				'  #wa-side-column, .two > div.x47corl > div:first-child, .two > div.x1o0tod > div:first-child, .two > div > div.xevlxbw {' +
+				'  .two > div:has(#side), #wa-side-column, .two > div.x47corl > div:first-child, .two > div.x1o0tod > div:first-child, .two > div > div.xevlxbw {' +
 				'    position: relative !important;' +
 				'    width: var(--wa-chatlist-width, 380px) !important;' +
 				'    min-width: 220px !important;' +
 				'    max-width: min(85vw, calc(100vw - 260px)) !important;' +
 				'    flex: 0 0 var(--wa-chatlist-width, 380px) !important;' +
 				'    height: 100% !important;' +
-				'    transition: none !important;' +
 				'  }' +
-				'  #side, #main, .two > div { transition: none !important; }' +
 				'  #side { width: 100% !important; max-width: 100% !important; height: 100% !important; flex: 1 1 auto !important; display: flex !important; flex-direction: column !important; }' +
 				'  #pane-side, div[data-testid="chat-list"] { min-width: 200px !important; -webkit-overflow-scrolling: touch !important; }' +
 				'  #main { min-width: 240px !important; -webkit-overflow-scrolling: touch !important; }' +
@@ -1211,9 +1280,10 @@ func getInitScript(ua string) string {
 				'}' +
 				'#wa-side-resizer { position: absolute; top: 0; right: -3px; width: 7px; height: 100%; cursor: col-resize !important; z-index: 99999; user-select: none; -webkit-user-select: none; touch-action: none; background: transparent; transition: background-color 0.15s ease, box-shadow 0.15s ease; }' +
 				'#wa-side-resizer:hover, #wa-side-resizer.wa-dragging { background-color: #00a884 !important; box-shadow: 0 0 8px rgba(0, 168, 132, 0.8) !important; }' +
-				'body.wa-resizing { cursor: col-resize !important; user-select: none !important; -webkit-user-select: none !important; }' +
-				'body.wa-resizing * { cursor: col-resize !important; user-select: none !important; -webkit-user-select: none !important; pointer-events: none !important; }' +
-				'body.wa-resizing #wa-side-resizer { pointer-events: auto !important; }';
+				'body.wa-resizing, body.wa-resizing * { cursor: col-resize !important; user-select: none !important; -webkit-user-select: none !important; pointer-events: none !important; transition: none !important; }' +
+				'body.wa-resizing #wa-side-resizer { pointer-events: auto !important; }' +
+				'[data-testid="media-viewer"] { contain: layout style; }' +
+				'[data-testid="media-viewer"] img, [data-testid="media-viewer"] video { will-change: transform; backface-visibility: hidden; -webkit-backface-visibility: hidden; }';
 
 			var respTimer = null;
 			function injectResponsive() {
@@ -1843,13 +1913,39 @@ func getInitScript(ua string) string {
 			injectHeaderToolbarBtn();
 			document.addEventListener('DOMContentLoaded', injectHeaderToolbarBtn);
 			window.addEventListener('load', injectHeaderToolbarBtn);
-			setInterval(injectHeaderToolbarBtn, 2000);
+
+			var tbObserverScheduled = false;
+			var tbObserver = new MutationObserver(function() {
+				if (!document.getElementById('wa-toolbar-settings-btn')) {
+					if (!tbObserverScheduled) {
+						tbObserverScheduled = true;
+						requestAnimationFrame(function() {
+							tbObserverScheduled = false;
+							injectHeaderToolbarBtn();
+						});
+					}
+				}
+			});
+			var tbTarget = document.getElementById('app') || document.body;
+			if (tbTarget) {
+				tbObserver.observe(tbTarget, { childList: true, subtree: true });
+			} else {
+				document.addEventListener('DOMContentLoaded', function() {
+					var t = document.getElementById('app') || document.body;
+					if (t) tbObserver.observe(t, { childList: true, subtree: true });
+				});
+			}
+			setInterval(injectHeaderToolbarBtn, 3000);
 
 			// --- Minimalist WhatsApp Control Center Modal ---
 			window.showSettingsModal = function() {
 				if (document.getElementById('wa-settings-overlay')) {
 					var ex = document.getElementById('wa-settings-overlay');
-					if (ex.parentNode) ex.parentNode.removeChild(ex);
+					if (ex.__waClose) {
+						ex.__waClose();
+					} else if (ex.parentNode) {
+						ex.parentNode.removeChild(ex);
+					}
 					return;
 				}
 
@@ -1859,11 +1955,11 @@ func getInitScript(ua string) string {
 
 				var overlay = document.createElement('div');
 				overlay.id = 'wa-settings-overlay';
-				overlay.style.cssText = 'position:fixed;inset:0;background:rgba(8,15,19,.68);z-index:9999999;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;';
+				overlay.style.cssText = 'position:fixed;inset:0;background:rgba(8,15,19,.68);z-index:9999999;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;opacity:0;transition:opacity 0.18s cubic-bezier(.16,1,.3,1);';
 
 				var modal = document.createElement('div');
 				modal.id = 'wa-settings-container';
-				modal.style.cssText = 'width:520px;max-width:96vw;max-height:90vh;border-radius:10px;box-sizing:border-box;display:flex;flex-direction:column;gap:0;overflow-y:auto;padding:0 22px 18px;box-shadow:0 18px 48px rgba(0,0,0,.32);';
+				modal.style.cssText = 'width:520px;max-width:96vw;max-height:90vh;border-radius:10px;box-sizing:border-box;display:flex;flex-direction:column;gap:0;overflow-y:auto;padding:0 22px 18px;box-shadow:0 18px 48px rgba(0,0,0,.32);transform:scale(0.96) translateY(6px);opacity:0;transition:transform 0.18s cubic-bezier(.16,1,.3,1), opacity 0.18s cubic-bezier(.16,1,.3,1);';
 
 				// Header
 				var header = document.createElement('div');
@@ -2074,14 +2170,30 @@ func getInitScript(ua string) string {
 
 				overlay.appendChild(modal);
 				document.body.appendChild(overlay);
+				requestAnimationFrame(function() {
+					overlay.style.opacity = '1';
+					modal.style.opacity = '1';
+					modal.style.transform = 'scale(1) translateY(0)';
+				});
+
 				modal.addEventListener('pointerdown', function(e) { e.stopPropagation(); });
 				modal.addEventListener('click', function(e) { e.stopPropagation(); });
 
+				var isClosing = false;
 				function closeSettings() {
+					if (isClosing) return;
+					isClosing = true;
 					window.removeEventListener('keydown', onKeyClose);
 					window.syncModalTheme = null;
-					if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+					overlay.style.opacity = '0';
+					modal.style.opacity = '0';
+					modal.style.transform = 'scale(0.96) translateY(6px)';
+					setTimeout(function() {
+						if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+					}, 190);
 				}
+				overlay.__waClose = closeSettings;
+
 				function onKeyClose(e) {
 					if (e.key === 'Escape') closeSettings();
 				}
@@ -2334,7 +2446,11 @@ func getInitScript(ua string) string {
 				}
 			});
 		})();
-	` + "\n" + getOnboardingScript() + "\n" + getReverseEngineeringScript()
+	` + "\n" + getOnboardingScript()
+	if debugMode {
+		baseScript += "\n" + getReverseEngineeringScript()
+	}
+	return baseScript
 }
 
 type WindowState struct {
@@ -2345,6 +2461,10 @@ type WindowState struct {
 }
 
 func main() {
+	flag.BoolVar(&debugMode, "debug", false, "Enable debug mode (WebKit remote inspector & RE DevTools)")
+	flag.BoolVar(&debugMode, "d", false, "Enable debug mode (shorthand)")
+	flag.Parse()
+
 	if !validateBuildEnvironment() {
 		return
 	}
