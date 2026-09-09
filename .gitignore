@@ -1,0 +1,18 @@
+# Binaries
+ndwhatsapp
+whatsapp-desk
+*.exe
+*.dll
+*.so
+*.dylib
+*.app
+*.dmg
+
+# Temporary & Lock files
+*.lock
+app.lock
+*.log
+
+# OS metadata
+.DS_Store
+Thumbs.db
