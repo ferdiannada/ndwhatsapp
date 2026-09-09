@@ -56,7 +56,6 @@
 | **`Ctrl + Shift + T`** | Always on Top (Window Pinning) |
 | **`Ctrl + Shift + M`** | Mute / Unmute notifikasi suara |
 | **`Ctrl + Shift + O`** | Buka folder unduhan (*Downloads*) |
-| **`Ctrl + Shift + U`** | Periksa pembaruan (*Check for updates*) |
 | **`F5`** / **`Ctrl + R`** | Muat ulang obrolan (*Reload*) |
 | **`Ctrl + Shift + R`** | Hard refresh antarmuka |
 

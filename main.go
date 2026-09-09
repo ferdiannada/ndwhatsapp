@@ -1161,162 +1161,6 @@ func getInitScript(ua string) string {
 			});
 		})();
 
-		// In-App Auto Updater UI and Handlers
-		(function() {
-			window.showUpdateBanner = function(latestVersion, releaseTitle, downloadUrl) {
-				if (document.getElementById('wa-update-banner')) return;
-				if (sessionStorage.getItem('dismissed_update_' + latestVersion) === 'true') return;
-
-				if (!document.getElementById('wa-update-anim')) {
-					var animStyle = document.createElement('style');
-					animStyle.id = 'wa-update-anim';
-					animStyle.textContent = '@keyframes waSlideDown { from { transform: translateY(-100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }' +
-						'#wa-btn-update:hover { background: #029070 !important; transform: translateY(-1px); }' +
-						'#wa-btn-dismiss:hover { color: #e9edef !important; }';
-					document.head.appendChild(animStyle);
-				}
-
-				var banner = document.createElement('div');
-				banner.id = 'wa-update-banner';
-				banner.style.cssText = 'position:fixed;top:0;left:0;right:0;background:rgba(17,27,33,0.97);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid rgba(0,168,132,0.35);padding:9px 18px;display:flex;align-items:center;justify-content:space-between;gap:12px;z-index:9999998;box-shadow:0 6px 24px rgba(0,0,0,0.6);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#e9edef;font-size:13px;animation:waSlideDown 0.25s cubic-bezier(0.16,1,0.3,1);';
-
-				var leftWrap = document.createElement('div');
-				leftWrap.style.cssText = 'display:flex;align-items:center;gap:10px;min-width:0;flex:1;';
-
-				var badge = document.createElement('span');
-				badge.style.cssText = 'background:rgba(0,168,132,0.15);color:#00a884;border:1px solid rgba(0,168,132,0.35);padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;letter-spacing:0.3px;flex-shrink:0;';
-				badge.textContent = 'v' + latestVersion;
-
-				var msg = document.createElement('span');
-				msg.id = 'wa-update-text';
-				msg.style.cssText = 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12.5px;color:#d1d7db;';
-				var titleText = releaseTitle ? releaseTitle : ('WhatsApp Desk v' + latestVersion);
-				msg.innerHTML = 'Update available: <strong style="color:#e9edef;">' + titleText + '</strong>';
-
-				leftWrap.appendChild(badge);
-				leftWrap.appendChild(msg);
-
-				var rightWrap = document.createElement('div');
-				rightWrap.style.cssText = 'display:flex;align-items:center;gap:8px;flex-shrink:0;';
-
-				var actionsDiv = document.createElement('div');
-				actionsDiv.id = 'wa-update-actions';
-				actionsDiv.style.cssText = 'display:flex;align-items:center;gap:8px;';
-
-				var btnUpdate = document.createElement('button');
-				btnUpdate.id = 'wa-btn-update';
-				btnUpdate.textContent = 'Update Now';
-				btnUpdate.style.cssText = 'background:#00a884;color:#111b21;border:none;padding:5px 14px;border-radius:14px;font-size:12px;font-weight:600;cursor:pointer;outline:none;transition:all 0.15s ease;box-shadow:0 2px 8px rgba(0,168,132,0.3);';
-
-				var btnDismiss = document.createElement('button');
-				btnDismiss.id = 'wa-btn-dismiss';
-				btnDismiss.textContent = 'Later';
-				btnDismiss.style.cssText = 'background:transparent;color:#8696a0;border:none;padding:5px 10px;border-radius:14px;font-size:12px;cursor:pointer;outline:none;transition:color 0.15s ease;';
-
-				actionsDiv.appendChild(btnUpdate);
-				actionsDiv.appendChild(btnDismiss);
-
-				var progressWrap = document.createElement('div');
-				progressWrap.id = 'wa-update-progress-wrap';
-				progressWrap.style.cssText = 'display:none;align-items:center;gap:10px;';
-
-				var barTrack = document.createElement('div');
-				barTrack.style.cssText = 'width:130px;height:6px;background:rgba(255,255,255,0.12);border-radius:3px;overflow:hidden;';
-
-				var barFill = document.createElement('div');
-				barFill.id = 'wa-update-progress-bar';
-				barFill.style.cssText = 'width:0%;height:100%;background:#00a884;border-radius:3px;transition:width 0.18s ease;';
-				barTrack.appendChild(barFill);
-
-				var pctLabel = document.createElement('span');
-				pctLabel.id = 'wa-update-progress-pct';
-				pctLabel.style.cssText = 'font-size:11.5px;color:#00a884;font-weight:600;min-width:32px;text-align:right;';
-				pctLabel.textContent = '0%';
-
-				progressWrap.appendChild(barTrack);
-				progressWrap.appendChild(pctLabel);
-
-				rightWrap.appendChild(actionsDiv);
-				rightWrap.appendChild(progressWrap);
-
-				banner.appendChild(leftWrap);
-				banner.appendChild(rightWrap);
-				var bannerParent = document.body || document.documentElement;
-				if (bannerParent) bannerParent.appendChild(banner);
-
-				try {
-					if (window.sendNativeNotification) {
-						var notifTitle = 'Update Available';
-						var notifBody = 'WhatsApp Desk v' + latestVersion + ' is available. Click to update the application.';
-						window.sendNativeNotification(notifTitle, notifBody);
-					}
-				} catch (e) {}
-
-				btnUpdate.onclick = function() {
-					actionsDiv.style.display = 'none';
-					progressWrap.style.display = 'flex';
-					msg.textContent = 'Downloading update package...';
-					if (window.startUpdateNative) {
-						window.startUpdateNative(downloadUrl);
-					}
-				};
-
-				btnDismiss.onclick = function() {
-					sessionStorage.setItem('dismissed_update_' + latestVersion, 'true');
-					if (banner.parentNode) {
-						banner.parentNode.removeChild(banner);
-					}
-				};
-			};
-
-			window.onUpdateProgress = function(pct) {
-				var bar = document.getElementById('wa-update-progress-bar');
-				var label = document.getElementById('wa-update-progress-pct');
-				if (bar) bar.style.width = pct + '%';
-				if (label) label.textContent = pct + '%';
-			};
-
-			window.onUpdateStatus = function(statusMsg) {
-				var msg = document.getElementById('wa-update-text');
-				if (msg) msg.textContent = statusMsg;
-			};
-
-			window.onUpdateError = function(errMsg) {
-				var actions = document.getElementById('wa-update-actions');
-				var prog = document.getElementById('wa-update-progress-wrap');
-				if (actions) actions.style.display = 'flex';
-				if (prog) prog.style.display = 'none';
-				showFloatingToast('❌ Failed to update: ' + errMsg);
-			};
-
-			// Manual Check Function and Shortcut (Cmd/Ctrl + Shift + U)
-			window.triggerCheckForUpdate = function() {
-				showFloatingToast('🔍 Checking for updates...');
-				if (window.checkForUpdateNative) {
-					return window.checkForUpdateNative(true).then(function(res) {
-						if (res && res.available) {
-							window.showUpdateBanner(res.latest_version, res.release_title, res.download_url);
-						} else {
-							var cur = (res && res.current_version) ? res.current_version : '1.5.4';
-							showFloatingToast('✅ WhatsApp Desk is up to date (v' + cur + ')');
-						}
-						return res;
-					}).catch(function() {
-						showFloatingToast('⚠️ Unable to check for updates at this time.');
-					});
-				}
-				return Promise.resolve(null);
-			};
-
-			window.addEventListener('keydown', function(e) {
-				if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'u' || e.key === 'U')) {
-					e.preventDefault();
-					window.triggerCheckForUpdate();
-				}
-			});
-		})();
-
-		// Dynamic Responsive Desktop Layout & Resizable Chat List
 		// Dynamic Responsive Desktop Layout & Resizable Chat List
 		(function() {
 			var respStyle = document.createElement('style');
@@ -2218,9 +2062,9 @@ func getInitScript(ua string) string {
 				actionsSection.className = 'wa-modal-card';
 				actionsSection.style.cssText = 'display:flex;flex-direction:column;gap:8px;border-radius:0;border-width:0 0 1px;border-style:solid;padding:14px 0;';
 				actionsSection.innerHTML = '' +
-					'<strong class="wa-text-primary" style="font-size:12.5px;">Maintenance</strong>' +
+					'<strong class="wa-text-primary" style="font-size:12.5px;">Maintenance & Tools</strong>' +
 					'<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">' +
-					'  <button id="wa-btn-check-updates-modal" class="wa-card-btn" style="padding:6px 8px;border-radius:6px;font-size:11.5px;font-weight:500;cursor:pointer;border-width:1px;border-style:solid;text-align:center;">Check for updates</button>' +
+					'  <button id="wa-btn-devtools-modal" class="wa-card-btn" style="padding:6px 8px;border-radius:6px;font-size:11.5px;font-weight:500;cursor:pointer;border-width:1px;border-style:solid;text-align:center;">DevTools & HUD</button>' +
 					'  <button id="wa-btn-reload-modal" class="wa-card-btn" style="padding:6px 8px;border-radius:6px;font-size:11.5px;font-weight:500;cursor:pointer;border-width:1px;border-style:solid;text-align:center;">Reload chat</button>' +
 					'  <button id="wa-btn-hardref-modal" class="wa-card-btn" style="padding:6px 8px;border-radius:6px;font-size:11.5px;font-weight:500;cursor:pointer;border-width:1px;border-style:solid;text-align:center;">Clear cache</button>' +
 					'  <button id="wa-btn-onboard-modal" class="wa-card-btn" style="padding:6px 8px;border-radius:6px;font-size:11.5px;font-weight:500;cursor:pointer;border-width:1px;border-style:solid;text-align:center;">View welcome guide</button>' +
@@ -2415,9 +2259,9 @@ func getInitScript(ua string) string {
 					}
 				};
 
-				document.getElementById('wa-btn-check-updates-modal').onclick = function() {
+				document.getElementById('wa-btn-devtools-modal').onclick = function() {
 					closeSettings();
-					if (window.triggerCheckForUpdate) window.triggerCheckForUpdate();
+					if (window.ndWA && window.ndWA.toggleHUD) window.ndWA.toggleHUD();
 				};
 				document.getElementById('wa-btn-reload-modal').onclick = function() {
 					if (window.reloadWhatsApp) window.reloadWhatsApp();

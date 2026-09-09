@@ -264,21 +264,6 @@ func runApp() {
 		}
 	})
 
-	// Bind in-app auto updater
-	_ = w.Bind("checkForUpdateNative", func(manual bool) UpdateInfo {
-		info, err := checkForUpdate(appVersion)
-		if err != nil {
-			return UpdateInfo{CurrentVersion: appVersion}
-		}
-		return *info
-	})
-
-	_ = w.Bind("startUpdateNative", func(downloadURL string) {
-		go func() {
-			_ = executeUpdate(w, downloadURL)
-		}()
-	})
-
 	// Bind download, preview, and settings handlers
 	_ = w.Bind("saveDownloadedFileNative", func(filename, dataURI string) string {
 		path, err := saveDownloadedFile(filename, dataURI)
@@ -340,29 +325,6 @@ func runApp() {
 
 	w.Init(getInitScript(userAgentLinux))
 	w.Navigate(appURL)
-
-	// Check for updates in the background after startup & periodically
-	go func() {
-		checkAndNotifyUpdate := func() {
-			info, err := checkForUpdate(appVersion)
-			if err == nil && info != nil && info.Available {
-				w.Dispatch(func() {
-					script := fmt.Sprintf("if (window.showUpdateBanner) { window.showUpdateBanner(%q, %q, %q); }",
-						info.LatestVersion, info.ReleaseTitle, info.DownloadURL)
-					w.Eval(script)
-				})
-			}
-		}
-
-		time.Sleep(5 * time.Second)
-		checkAndNotifyUpdate()
-
-		ticker := time.NewTicker(4 * time.Hour)
-		defer ticker.Stop()
-		for range ticker.C {
-			checkAndNotifyUpdate()
-		}
-	}()
 
 	defer saveWindowState(userDataDir, initialWidth, initialHeight)
 	w.Run()
