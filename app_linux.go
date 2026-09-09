@@ -102,7 +102,28 @@ static void attach_touchpad_pinch_filter(void *gtk_window_ptr) {
 			webkit_settings_set_hardware_acceleration_policy(settings, WEBKIT_HARDWARE_ACCELERATION_POLICY_ALWAYS);
 			webkit_settings_set_enable_2d_canvas_acceleration(settings, TRUE);
 		}
+
+		// Configure WebKit memory management & cache model
+		WebKitWebContext *context = webkit_web_view_get_context(view);
+		if (context) {
+			webkit_web_context_set_cache_model(context, WEBKIT_CACHE_MODEL_DOCUMENT_BROWSER);
+			WebKitWebsiteDataManager *manager = webkit_web_context_get_website_data_manager(context);
+			if (manager) {
+				WebKitMemoryPressureSettings *mps = webkit_memory_pressure_settings_new();
+				webkit_memory_pressure_settings_set_memory_limit(mps, 1024);
+				webkit_memory_pressure_settings_set_conservative_threshold(mps, 0.70);
+				webkit_memory_pressure_settings_set_strict_threshold(mps, 0.90);
+				webkit_website_data_manager_set_memory_pressure_settings(mps);
+				webkit_memory_pressure_settings_free(mps);
+			}
+		}
 	}
+}
+
+#include <malloc.h>
+
+static void trim_process_memory() {
+	malloc_trim(0);
 }
 */
 import "C"
@@ -117,6 +138,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"sync"
 	"syscall"
 	"time"
@@ -455,6 +477,15 @@ func runApp() {
 
 	_ = w.Bind("setAppThemeNative", func(theme string) string {
 		return saveTheme(theme)
+	})
+
+	_ = w.Bind("releaseMemoryNative", func() bool {
+		go func() {
+			runtime.GC()
+			debug.FreeOSMemory()
+			C.trim_process_memory()
+		}()
+		return true
 	})
 
 	w.Init(getInitScript(userAgentLinux))

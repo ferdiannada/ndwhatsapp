@@ -175,7 +175,7 @@ func getInitScript(ua string) string {
 							if (node.nodeType === 1) {
 								if (node.tagName === 'VIDEO' || node.tagName === 'AUDIO') {
 									prepareMedia(node);
-								} else if (node.getElementsByTagName && (node.getElementsByTagName('video').length > 0 || node.getElementsByTagName('audio').length > 0)) {
+								} else if (node.firstElementChild) {
 									var list = node.querySelectorAll('video, audio');
 									for (var l = 0; l < list.length; l++) {
 										prepareMedia(list[l]);
@@ -1048,7 +1048,7 @@ func getInitScript(ua string) string {
 			window.addEventListener('gestureend', function(e) { e.preventDefault(); }, { passive: false });
 		})();
 
-		// Dock Badge Unread Count Synchronizer
+		// Dock Badge Unread Count Synchronizer (Purely Event-Driven, Zero Polling)
 		(function() {
 			var lastBadge = null;
 			function syncBadge() {
@@ -1062,15 +1062,21 @@ func getInitScript(ua string) string {
 					}
 				}
 			}
-			var titleEl = document.querySelector('title');
-			if (titleEl) {
-				new MutationObserver(syncBadge).observe(titleEl, { childList: true, characterData: true, subtree: true });
+			function setupTitleObserver() {
+				var titleEl = document.querySelector('title');
+				if (titleEl) {
+					new MutationObserver(syncBadge).observe(titleEl, { childList: true, characterData: true, subtree: true });
+					syncBadge();
+				}
+			}
+			if (document.querySelector('title')) {
+				setupTitleObserver();
 			} else {
-				setInterval(syncBadge, 3000);
+				document.addEventListener('DOMContentLoaded', setupTitleObserver, { once: true });
 			}
 		})();
 
-		// Memory Optimization: Idle Garbage Collection
+		// Memory Optimization: Idle Garbage Collection & OS RAM Trimming
 		(function() {
 			var releaseTimer = null;
 			document.addEventListener('visibilitychange', function() {
@@ -1547,12 +1553,18 @@ func getInitScript(ua string) string {
 
 			var resizerScheduled = false;
 			var observer = new MutationObserver(function() {
-				if (document.getElementById('wa-side-resizer')) return;
+				if (document.getElementById('wa-side-resizer')) {
+					observer.disconnect();
+					return;
+				}
 				if (!resizerScheduled && document.getElementById('side')) {
 					resizerScheduled = true;
 					requestAnimationFrame(function() {
 						resizerScheduled = false;
 						injectResizerHandle();
+						if (document.getElementById('wa-side-resizer')) {
+							observer.disconnect();
+						}
 					});
 				}
 			});
@@ -1695,6 +1707,7 @@ func getInitScript(ua string) string {
 				if (clickedDoc) {
 					lastClickedDocName = foundName;
 					lastDocumentIntentAt = Date.now();
+					activateViewerObserver();
 					if (isDocumentFileName(foundName)) {
 						var directDownload = findDocumentDownloadControl(el);
 						if (directDownload && !directDownload.contains(el)) {
@@ -1722,21 +1735,35 @@ func getInitScript(ua string) string {
 				}
 			}, true);
 
-			// Hook 4: MutationObserver to auto-dismiss stuck media viewer and trigger download/preview
-			var viewerObserver = new MutationObserver(function() {
-				if (!isRecentPDFIntent()) return;
-				if (!document.getElementById('wa-doc-modal-overlay')) triggerVisibleViewerDownload();
-			});
-
-			function initViewerObserver() {
+			// Hook 4: Demand-driven MutationObserver to auto-dismiss stuck media viewer on document preview
+			var viewerObserver = null;
+			var viewerObserverTimer = null;
+			function activateViewerObserver() {
+				if (!viewerObserver) {
+					viewerObserver = new MutationObserver(function() {
+						if (!isRecentPDFIntent()) {
+							if (viewerObserver) {
+								viewerObserver.disconnect();
+								viewerObserver = null;
+							}
+							return;
+						}
+						if (!document.getElementById('wa-doc-modal-overlay')) triggerVisibleViewerDownload();
+					});
+				}
+				clearTimeout(viewerObserverTimer);
 				var target = document.body || document.documentElement;
 				if (target) {
 					viewerObserver.observe(target, { childList: true, subtree: true });
-				} else {
-					document.addEventListener('DOMContentLoaded', initViewerObserver, { once: true });
 				}
+				viewerObserverTimer = setTimeout(function() {
+					if (viewerObserver) {
+						viewerObserver.disconnect();
+						viewerObserver = null;
+					}
+				}, 15000);
 			}
-			initViewerObserver();
+			window.__waActivateViewerObserver = activateViewerObserver;
 		})();
 
 		// Theme Manager, In-Flow Header Toolbar Button & Control Center Modal
@@ -1885,11 +1912,6 @@ func getInitScript(ua string) string {
 			initTheme();
 			document.addEventListener('DOMContentLoaded', initTheme);
 			window.addEventListener('load', initTheme);
-			setInterval(function() {
-				if (document.body && !themeObserver) {
-					applyThemeToDOM(currentTheme);
-				}
-			}, 2000);
 
 			// --- In-Flow Header Toolbar Button (Non-Floating, Clean WhatsApp Style) ---
 			function injectHeaderToolbarBtn() {
@@ -1935,14 +1957,19 @@ func getInitScript(ua string) string {
 
 			var tbObserverScheduled = false;
 			var tbObserver = new MutationObserver(function() {
-				if (!document.getElementById('wa-toolbar-settings-btn')) {
-					if (!tbObserverScheduled) {
-						tbObserverScheduled = true;
-						requestAnimationFrame(function() {
-							tbObserverScheduled = false;
-							injectHeaderToolbarBtn();
-						});
-					}
+				if (document.getElementById('wa-toolbar-settings-btn')) {
+					tbObserver.disconnect();
+					return;
+				}
+				if (!tbObserverScheduled) {
+					tbObserverScheduled = true;
+					requestAnimationFrame(function() {
+						tbObserverScheduled = false;
+						injectHeaderToolbarBtn();
+						if (document.getElementById('wa-toolbar-settings-btn')) {
+							tbObserver.disconnect();
+						}
+					});
 				}
 			});
 			var tbTarget = document.getElementById('app') || document.body;
@@ -1954,7 +1981,6 @@ func getInitScript(ua string) string {
 					if (t) tbObserver.observe(t, { childList: true, subtree: true });
 				});
 			}
-			setInterval(injectHeaderToolbarBtn, 3000);
 
 			// --- Minimalist WhatsApp Control Center Modal ---
 			window.showSettingsModal = function() {
