@@ -257,8 +257,10 @@ func getInitScript(ua string) string {
 		var lastDocumentIntentAt = 0;
 		function extractDocumentName(el) {
 			if (!el || typeof el.closest !== 'function') return '';
-			// NEVER extract document names from inside the media viewer, modal dialogs, or top toolbars
-			if (el.closest('[data-testid="media-viewer"]') ||
+			// Fast exit: images, videos, audio, media viewer, and overlays are never documents
+			if (el.tagName === 'IMG' || el.tagName === 'VIDEO' ||
+			    el.closest('[data-testid="media-viewer"]') ||
+			    el.closest('img, [data-testid*="image"], [data-testid*="video"], [data-testid*="audio"]') ||
 			    el.closest('#wa-doc-modal-overlay') ||
 			    el.closest('[role="toolbar"]') ||
 			    el.closest('header')) {
@@ -275,9 +277,9 @@ func getInitScript(ua string) string {
 				var titleMatch = title && title.match(/([^\n\r<>]{1,180}\.(pdf|docx?|xlsx?|pptx?|txt|csv|rtf))\b/i);
 				if (titleMatch && titleMatch[1]) return titleMatch[1].trim();
 
-				// Check text only on leaf-ish nodes to prevent matching unrelated long container text
+				// Check text only on leaf nodes using textContent (never innerText to prevent layout reflows)
 				if (!node.children || node.children.length < 5) {
-					var text = (node.innerText || '').trim();
+					var text = (node.textContent || '').trim();
 					if (text.length > 0 && text.length < 250) {
 						var textMatch = text.match(/([^\n\r<>]{1,180}\.(pdf|docx?|xlsx?|pptx?|txt|csv|rtf))\b/i);
 						if (textMatch && textMatch[1]) return textMatch[1].trim();
@@ -978,14 +980,14 @@ func getInitScript(ua string) string {
 
 				// Proportional scaling: deltaScale is actual continuous delta
 				// Negative wheel delta zooms in, positive zooms out
-				pendingPinchDelta += (-deltaScale * 1400);
+				pendingPinchDelta += (-deltaScale * 1200);
 
 				if (!pinchRafId) {
 					pinchRafId = requestAnimationFrame(function() {
 						pinchRafId = null;
-						if (Math.abs(pendingPinchDelta) < 1) return;
+						if (Math.abs(pendingPinchDelta) < 0.5) return;
 
-						var deltaY = pendingPinchDelta;
+						var deltaY = Math.max(-120, Math.min(120, pendingPinchDelta));
 						pendingPinchDelta = 0;
 
 						var target = viewer.querySelector('img') || viewer.querySelector('video') || viewer;
@@ -1299,8 +1301,7 @@ func getInitScript(ua string) string {
 				'#wa-side-resizer:hover, #wa-side-resizer.wa-dragging { background-color: #00a884 !important; box-shadow: 0 0 8px rgba(0, 168, 132, 0.8) !important; }' +
 				'body.wa-resizing, body.wa-resizing * { cursor: col-resize !important; user-select: none !important; -webkit-user-select: none !important; pointer-events: none !important; transition: none !important; }' +
 				'body.wa-resizing #wa-side-resizer { pointer-events: auto !important; }' +
-				'[data-testid="media-viewer"], div[role="dialog"]:has(img) { contain: layout style; }' +
-				'[data-testid="media-viewer"] img, [data-testid="media-viewer"] video, div[role="dialog"] img { will-change: transform; backface-visibility: hidden; -webkit-backface-visibility: hidden; transform: translateZ(0); -webkit-transform: translateZ(0); transition: transform 0.05s ease-out !important; }';
+				'[data-testid="media-viewer"] img { will-change: transform; backface-visibility: hidden; }';
 
 			var respTimer = null;
 			function injectResponsive() {

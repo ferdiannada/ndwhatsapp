@@ -9,6 +9,8 @@ package main
 #include <math.h>
 
 static gdouble last_pinch_scale = 1.0;
+static gdouble accumulated_delta_scale = 0.0;
+static guint32 last_eval_time = 0;
 
 static gboolean on_webview_touchpad_event(GtkWidget *widget, GdkEvent *event, gpointer user_data) {
 	(void)widget;
@@ -18,20 +20,30 @@ static gboolean on_webview_touchpad_event(GtkWidget *widget, GdkEvent *event, gp
 
 		if (pinch->phase == GDK_TOUCHPAD_GESTURE_PHASE_BEGIN) {
 			last_pinch_scale = 1.0;
+			accumulated_delta_scale = 0.0;
+			last_eval_time = 0;
 		} else if (pinch->phase == GDK_TOUCHPAD_GESTURE_PHASE_UPDATE) {
 			gdouble delta_scale = pinch->scale - last_pinch_scale;
-			if (fabs(delta_scale) >= 0.008) {
-				last_pinch_scale = pinch->scale;
+			last_pinch_scale = pinch->scale;
+			accumulated_delta_scale += delta_scale;
+
+			// Throttle evaluation to ~60 FPS (16ms intervals) and avoid zero/jitter updates
+			if ((pinch->time - last_eval_time >= 16 || last_eval_time == 0) && fabs(accumulated_delta_scale) >= 0.005) {
+				last_eval_time = pinch->time;
+				gdouble delta_to_send = accumulated_delta_scale;
+				accumulated_delta_scale = 0.0;
 				if (view) {
 					char js[160];
 					snprintf(js, sizeof(js),
 						"window.__onNativeTouchpadPinch && window.__onNativeTouchpadPinch(%f, %f, %f);",
-						delta_scale, pinch->x, pinch->y);
+						delta_to_send, pinch->x, pinch->y);
 					webkit_web_view_evaluate_javascript(view, js, -1, NULL, NULL, NULL, NULL, NULL);
 				}
 			}
 		} else if (pinch->phase == GDK_TOUCHPAD_GESTURE_PHASE_END || pinch->phase == GDK_TOUCHPAD_GESTURE_PHASE_CANCEL) {
 			last_pinch_scale = 1.0;
+			accumulated_delta_scale = 0.0;
+			last_eval_time = 0;
 		}
 
 		return TRUE; // Suppress native WebKitGTK whole-window zoom
@@ -75,9 +87,8 @@ static void attach_touchpad_pinch_filter(void *gtk_window_ptr) {
 	WebKitWebView *view = find_webkit_view(window);
 	if (view) {
 		GtkWidget *view_widget = GTK_WIDGET(view);
-		// Intercept native touchpad pinch before WebKitGTK processes it
+		// Intercept native touchpad pinch on the WebKitWebView widget
 		g_signal_connect(view_widget, "event", G_CALLBACK(on_webview_touchpad_event), view);
-		g_signal_connect(window, "event", G_CALLBACK(on_webview_touchpad_event), view);
 		// Secondary lock: ensure WebKit zoom-level is always locked to 1.0
 		g_signal_connect(view, "notify::zoom-level", G_CALLBACK(on_webview_zoom_level_notify), NULL);
 		webkit_web_view_set_zoom_level(view, 1.0);
