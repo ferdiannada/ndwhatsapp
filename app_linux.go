@@ -20,7 +20,7 @@ static gboolean on_webview_touchpad_event(GtkWidget *widget, GdkEvent *event, gp
 			last_pinch_scale = 1.0;
 		} else if (pinch->phase == GDK_TOUCHPAD_GESTURE_PHASE_UPDATE) {
 			gdouble delta_scale = pinch->scale - last_pinch_scale;
-			if (fabs(delta_scale) >= 0.025) {
+			if (fabs(delta_scale) >= 0.008) {
 				last_pinch_scale = pinch->scale;
 				if (view) {
 					char js[160];
@@ -81,6 +81,14 @@ static void attach_touchpad_pinch_filter(void *gtk_window_ptr) {
 		// Secondary lock: ensure WebKit zoom-level is always locked to 1.0
 		g_signal_connect(view, "notify::zoom-level", G_CALLBACK(on_webview_zoom_level_notify), NULL);
 		webkit_web_view_set_zoom_level(view, 1.0);
+
+		// Optimize WebKit GPU settings for smooth rendering
+		WebKitSettings *settings = webkit_web_view_get_settings(view);
+		if (settings) {
+			webkit_settings_set_enable_smooth_scrolling(settings, TRUE);
+			webkit_settings_set_hardware_acceleration_policy(settings, WEBKIT_HARDWARE_ACCELERATION_POLICY_ALWAYS);
+			webkit_settings_set_enable_2d_canvas_acceleration(settings, TRUE);
+		}
 	}
 }
 */
