@@ -963,31 +963,49 @@ func getInitScript(ua string) string {
 			});
 
 			// Bridge for native touchpad pinch events dispatched from GTK Cgo layer
+			var pendingPinchDelta = 0;
+			var pinchRafId = null;
+			var lastPinchDispatch = 0;
+
 			window.__onNativeTouchpadPinch = function(deltaScale, clientX, clientY) {
-				var viewer = document.querySelector('[data-testid="media-viewer"]');
+				var viewer = document.querySelector('[data-testid="media-viewer"]') ||
+							 document.querySelector('div[role="dialog"] img')?.closest('div[role="dialog"]');
 				if (!viewer) return;
 
-				var target = document.elementFromPoint(clientX, clientY) || viewer;
-				if (!viewer.contains(target)) {
-					target = viewer.querySelector('img') || viewer;
-				}
+				// Directly target image or viewer without forcing synchronous layout flush (no elementFromPoint)
+				var target = viewer.querySelector('img') || viewer.querySelector('video') || viewer;
 
-				// deltaScale > 0 means zoom in (wheel deltaY < 0), deltaScale < 0 means zoom out (wheel deltaY > 0)
-				var wheelDelta = deltaScale > 0 ? -120 : 120;
-				var cleanWheel = new WheelEvent('wheel', {
-					bubbles: true,
-					cancelable: true,
-					view: window,
-					clientX: clientX,
-					clientY: clientY,
-					screenX: clientX,
-					screenY: clientY,
-					deltaX: 0,
-					deltaY: wheelDelta,
-					deltaZ: 0,
-					deltaMode: 0
-				});
-				target.dispatchEvent(cleanWheel);
+				// Smooth delta: 45 units per notch
+				pendingPinchDelta += (deltaScale > 0 ? -45 : 45);
+
+				if (!pinchRafId) {
+					pinchRafId = requestAnimationFrame(function() {
+						pinchRafId = null;
+						var now = performance.now();
+						// Cap at ~35ms intervals (~30 FPS updates) to allow WhatsApp's transform animation to keep up smoothly
+						if (now - lastPinchDispatch < 30) return;
+						lastPinchDispatch = now;
+
+						if (!pendingPinchDelta) return;
+						var deltaY = pendingPinchDelta;
+						pendingPinchDelta = 0;
+
+						var cleanWheel = new WheelEvent('wheel', {
+							bubbles: true,
+							cancelable: true,
+							view: window,
+							clientX: clientX || (window.innerWidth / 2),
+							clientY: clientY || (window.innerHeight / 2),
+							screenX: clientX || (window.innerWidth / 2),
+							screenY: clientY || (window.innerHeight / 2),
+							deltaX: 0,
+							deltaY: deltaY,
+							deltaZ: 0,
+							deltaMode: 0
+						});
+						target.dispatchEvent(cleanWheel);
+					});
+				}
 			};
 
 			// Intercept touchpad pinch-to-zoom (wheel with ctrlKey or gesture events)
@@ -1282,8 +1300,8 @@ func getInitScript(ua string) string {
 				'#wa-side-resizer:hover, #wa-side-resizer.wa-dragging { background-color: #00a884 !important; box-shadow: 0 0 8px rgba(0, 168, 132, 0.8) !important; }' +
 				'body.wa-resizing, body.wa-resizing * { cursor: col-resize !important; user-select: none !important; -webkit-user-select: none !important; pointer-events: none !important; transition: none !important; }' +
 				'body.wa-resizing #wa-side-resizer { pointer-events: auto !important; }' +
-				'[data-testid="media-viewer"] { contain: layout style; }' +
-				'[data-testid="media-viewer"] img, [data-testid="media-viewer"] video { will-change: transform; backface-visibility: hidden; -webkit-backface-visibility: hidden; }';
+				'[data-testid="media-viewer"], div[role="dialog"]:has(img) { contain: layout style; }' +
+				'[data-testid="media-viewer"] img, [data-testid="media-viewer"] video, div[role="dialog"] img { will-change: transform; backface-visibility: hidden; -webkit-backface-visibility: hidden; transform: translateZ(0); -webkit-transform: translateZ(0); }';
 
 			var respTimer = null;
 			function injectResponsive() {

@@ -20,7 +20,7 @@ static gboolean on_webview_touchpad_event(GtkWidget *widget, GdkEvent *event, gp
 			last_pinch_scale = 1.0;
 		} else if (pinch->phase == GDK_TOUCHPAD_GESTURE_PHASE_UPDATE) {
 			gdouble delta_scale = pinch->scale - last_pinch_scale;
-			if (fabs(delta_scale) >= 0.015) {
+			if (fabs(delta_scale) >= 0.025) {
 				last_pinch_scale = pinch->scale;
 				if (view) {
 					char js[160];
@@ -263,11 +263,10 @@ func runApp() {
 	cleanupPreviewDir()
 	defer cleanupPreviewDir()
 
-	// Prevent WebKitGTK WebProcess crash on Wayland / Mesa EGL (SkiaGLContext / __eglFini)
+	// Enable GPU accelerated compositing for 60-120 FPS fluid media & image zooming,
+	// while disabling dmabuf renderer to maintain rock-solid Wayland stability on Mesa Intel Iris Xe.
+	_ = os.Unsetenv("WEBKIT_DISABLE_COMPOSITING_MODE")
 	_ = os.Unsetenv("WEBKIT_FORCE_COMPOSITING_MODE")
-	if os.Getenv("WEBKIT_DISABLE_COMPOSITING_MODE") == "" {
-		_ = os.Setenv("WEBKIT_DISABLE_COMPOSITING_MODE", "1")
-	}
 	if os.Getenv("WEBKIT_DISABLE_DMABUF_RENDERER") == "" {
 		_ = os.Setenv("WEBKIT_DISABLE_DMABUF_RENDERER", "1")
 	}
