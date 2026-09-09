@@ -36,7 +36,7 @@ func getSettingsFilePath() string {
 	var baseDir string
 	if runtime.GOOS == "darwin" {
 		home, _ := os.UserHomeDir()
-		baseDir = filepath.Join(home, "Library", "Application Support", "WhatsAppDesktopLight")
+		baseDir = filepath.Join(home, "Library", "Application Support", "ndwhatsapp")
 	} else {
 		configDir, err := os.UserConfigDir()
 		if err != nil {
@@ -45,7 +45,7 @@ func getSettingsFilePath() string {
 				configDir = "."
 			}
 		}
-		baseDir = filepath.Join(configDir, "WhatsAppDesktopLight")
+		baseDir = filepath.Join(configDir, "ndwhatsapp")
 	}
 	_ = os.MkdirAll(baseDir, 0755)
 	return filepath.Join(baseDir, "settings.json")

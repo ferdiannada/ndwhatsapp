@@ -54,7 +54,7 @@ func getUserDataDir() string {
 		home, _ := os.UserHomeDir()
 		configDir = filepath.Join(home, ".config")
 	}
-	dir := filepath.Join(configDir, "WhatsAppDesk")
+	dir := filepath.Join(configDir, "ndwhatsapp")
 	_ = os.MkdirAll(dir, 0755)
 	return dir
 }
@@ -92,7 +92,7 @@ func getAutoStartDesktopPath() string {
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, ".config", "autostart", "whatsapp-desk.desktop")
+	return filepath.Join(home, ".config", "autostart", "ndwhatsapp.desktop")
 }
 
 func toggleAutoStartLinux() bool {
@@ -114,10 +114,10 @@ func toggleAutoStartLinux() bool {
 	desktopContent := fmt.Sprintf(`[Desktop Entry]
 Type=Application
 Version=1.0
-Name=WhatsApp Desk
-Comment=Lightweight WhatsApp Desktop Client
+Name=ndWhatsApp
+Comment=ndWhatsApp - Native Client & Reverse Engineering Suite
 Exec=%s
-Icon=whatsapp-desk
+Icon=ndwhatsapp
 Terminal=false
 Categories=Network;InstantMessaging;
 StartupNotify=true
