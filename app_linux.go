@@ -82,9 +82,11 @@ static void attach_touchpad_pinch_filter(void *gtk_window_ptr) {
 		g_signal_connect(view, "notify::zoom-level", G_CALLBACK(on_webview_zoom_level_notify), NULL);
 		webkit_web_view_set_zoom_level(view, 1.0);
 
-		// Optimize WebKit GPU settings for smooth rendering
+		// Optimize WebKit GPU settings and network consistency
 		WebKitSettings *settings = webkit_web_view_get_settings(view);
 		if (settings) {
+			webkit_settings_set_user_agent(settings, "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36");
+			webkit_settings_set_enable_page_cache(settings, TRUE);
 			webkit_settings_set_enable_smooth_scrolling(settings, TRUE);
 			webkit_settings_set_hardware_acceleration_policy(settings, WEBKIT_HARDWARE_ACCELERATION_POLICY_ALWAYS);
 			webkit_settings_set_enable_2d_canvas_acceleration(settings, TRUE);

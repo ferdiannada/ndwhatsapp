@@ -1807,14 +1807,15 @@ func getInitScript(ua string) string {
 					document.documentElement.style.colorScheme = 'light';
 				}
 
-				// 2. Synchronize WhatsApp Web's own localStorage keys
+				// 2. Synchronize WhatsApp Web's own localStorage keys (only if changed to avoid triggering unnecessary storage events)
 				try {
-					if (theme === 'system') {
-						localStorage.setItem('system-theme-mode', 'true');
-						localStorage.setItem('theme', JSON.stringify(isDark ? 'dark' : 'light'));
-					} else {
-						localStorage.setItem('system-theme-mode', 'false');
-						localStorage.setItem('theme', JSON.stringify(theme));
+					var targetSysMode = (theme === 'system') ? 'true' : 'false';
+					var targetThemeVal = JSON.stringify(theme === 'system' ? (isDark ? 'dark' : 'light') : theme);
+					if (localStorage.getItem('system-theme-mode') !== targetSysMode) {
+						localStorage.setItem('system-theme-mode', targetSysMode);
+					}
+					if (localStorage.getItem('theme') !== targetThemeVal) {
+						localStorage.setItem('theme', targetThemeVal);
 					}
 				} catch(e) {}
 
