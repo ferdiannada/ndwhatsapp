@@ -11,8 +11,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"runtime/debug"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -28,6 +28,9 @@ const (
 
 var (
 	isAlwaysOnTopLinux = false
+	metricsMutex       sync.Mutex
+	metricsCacheTime   time.Time
+	cachedMetrics      map[string]interface{}
 )
 
 func checkSingleInstance() (*os.File, bool) {
@@ -172,6 +175,8 @@ func runApp() {
 	}
 
 	userDataDir := getUserDataDir()
+	cleanupPreviewDir()
+	defer cleanupPreviewDir()
 
 	// Prevent WebKitGTK WebProcess crash on Wayland / Mesa EGL (SkiaGLContext)
 	_ = os.Unsetenv("WEBKIT_FORCE_COMPOSITING_MODE")
@@ -205,15 +210,6 @@ func runApp() {
 	w.SetTitle(windowTitle)
 	w.SetSize(initialWidth, initialHeight, webview.HintNone)
 
-	// Periodic Go runtime memory cleanup (every 60s)
-	go func() {
-		ticker := time.NewTicker(60 * time.Second)
-		defer ticker.Stop()
-		for range ticker.C {
-			debug.FreeOSMemory()
-		}
-	}()
-
 	// Bind window state saver from JS resize events
 	_ = w.Bind("saveWindowStateNative", func(width, height int) {
 		saveWindowState(userDataDir, width, height)
@@ -240,21 +236,39 @@ func runApp() {
 		// Not supported on standard Linux window managers
 	})
 
-	// Bind Always on Top toggle
+	// Bind Always on Top status & toggle
+	_ = w.Bind("isAlwaysOnTopNative", func() bool {
+		return isAlwaysOnTopLinux
+	})
+
 	_ = w.Bind("toggleAlwaysOnTopNative", func() bool {
 		return toggleAlwaysOnTopLinux()
 	})
 
-	// Bind Auto-Start toggle
+	// Bind Auto-Start status & toggle
+	_ = w.Bind("isAutoStartNative", func() bool {
+		p := getAutoStartDesktopPath()
+		if p == "" {
+			return false
+		}
+		_, err := os.Stat(p)
+		return err == nil
+	})
+
 	_ = w.Bind("toggleAutoStartNative", func() bool {
 		return toggleAutoStartLinux()
 	})
 
-	// Bind process metrics for Reverse Engineering HUD
+	// Bind process metrics for Reverse Engineering HUD (cached for 1.5s to avoid STW pauses)
 	_ = w.Bind("getProcessMetricsNative", func() map[string]interface{} {
+		metricsMutex.Lock()
+		defer metricsMutex.Unlock()
+		if time.Since(metricsCacheTime) < 1500*time.Millisecond && cachedMetrics != nil {
+			return cachedMetrics
+		}
 		var m runtime.MemStats
 		runtime.ReadMemStats(&m)
-		return map[string]interface{}{
+		cachedMetrics = map[string]interface{}{
 			"pid":        os.Getpid(),
 			"goroutines": runtime.NumGoroutine(),
 			"alloc_mb":   fmt.Sprintf("%.1f MB", float64(m.Alloc)/(1024*1024)),
@@ -262,6 +276,8 @@ func runApp() {
 			"gc_runs":    m.NumGC,
 			"inspector":  "http://127.0.0.1:9222",
 		}
+		metricsCacheTime = time.Now()
+		return cachedMetrics
 	})
 
 	// Bind download, preview, and settings handlers

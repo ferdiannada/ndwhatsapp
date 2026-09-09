@@ -4,11 +4,13 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 )
 
 type AppSettings struct {
@@ -16,6 +18,11 @@ type AppSettings struct {
 	NotifyOnDownload bool   `json:"notify_on_download"`
 	Theme            string `json:"theme"` // "dark", "light", "system"
 }
+
+var (
+	settingsMutex  sync.RWMutex
+	cachedSettings *AppSettings
+)
 
 func getDefaultDownloadDir() string {
 	home, err := os.UserHomeDir()
@@ -45,31 +52,63 @@ func getSettingsFilePath() string {
 }
 
 func loadSettings() *AppSettings {
+	settingsMutex.RLock()
+	if cachedSettings != nil {
+		defer settingsMutex.RUnlock()
+		clone := *cachedSettings
+		return &clone
+	}
+	settingsMutex.RUnlock()
+
+	settingsMutex.Lock()
+	defer settingsMutex.Unlock()
+
+	if cachedSettings != nil {
+		clone := *cachedSettings
+		return &clone
+	}
+
 	s := &AppSettings{
 		DownloadDir:      getDefaultDownloadDir(),
 		NotifyOnDownload: true,
 		Theme:            "dark",
 	}
 	data, err := os.ReadFile(getSettingsFilePath())
-	if err != nil {
-		return s
+	if err == nil {
+		_ = json.Unmarshal(data, s)
 	}
-	_ = json.Unmarshal(data, s)
 	if strings.TrimSpace(s.DownloadDir) == "" {
 		s.DownloadDir = getDefaultDownloadDir()
 	}
 	if strings.TrimSpace(s.Theme) == "" {
 		s.Theme = "dark"
 	}
-	return s
+	cachedSettings = s
+	clone := *s
+	return &clone
 }
 
 func saveSettings(s *AppSettings) error {
+	settingsMutex.Lock()
+	defer settingsMutex.Unlock()
+
 	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(getSettingsFilePath(), data, 0644)
+
+	targetPath := getSettingsFilePath()
+	tmpPath := targetPath + fmt.Sprintf(".tmp.%d", os.Getpid())
+	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, targetPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+
+	cachedSettings = s
+	return nil
 }
 
 func saveTheme(theme string) string {
@@ -80,23 +119,6 @@ func saveTheme(theme string) string {
 	s.Theme = theme
 	_ = saveSettings(s)
 	return s.Theme
-}
-
-func getUniqueFilePath(dir, filename string) string {
-	ext := filepath.Ext(filename)
-	base := strings.TrimSuffix(filename, ext)
-	if base == "" {
-		base = "download"
-	}
-	target := filepath.Join(dir, filename)
-	counter := 1
-	for {
-		if _, err := os.Stat(target); os.IsNotExist(err) {
-			return target
-		}
-		target = filepath.Join(dir, fmt.Sprintf("%s (%d)%s", base, counter, ext))
-		counter++
-	}
 }
 
 func saveDownloadedFile(filename, dataURI string) (string, error) {
@@ -115,22 +137,46 @@ func saveDownloadedFileToDir(targetDir, filename, dataURI string) (string, error
 		filename = "download"
 	}
 
-	// Extract and decode base64 payload
-	var rawBytes []byte
-	var err error
+	// Extract base64 payload
+	var payload string
 	idx := strings.Index(dataURI, ";base64,")
 	if idx != -1 {
-		rawBytes, err = base64.StdEncoding.DecodeString(dataURI[idx+8:])
+		payload = dataURI[idx+8:]
 	} else {
-		rawBytes, err = base64.StdEncoding.DecodeString(dataURI)
+		payload = dataURI
 	}
-	if err != nil {
-		return "", fmt.Errorf("gagal decode base64: %w", err)
+	decoder := base64.NewDecoder(base64.StdEncoding, strings.NewReader(payload))
+
+	// Atomically create target file using O_CREATE|O_EXCL to eliminate TOCTOU race
+	ext := filepath.Ext(filename)
+	base := strings.TrimSuffix(filename, ext)
+	if base == "" {
+		base = "download"
 	}
 
-	targetPath := getUniqueFilePath(targetDir, filename)
-	if err := os.WriteFile(targetPath, rawBytes, 0644); err != nil {
-		return "", fmt.Errorf("gagal menyimpan berkas: %w", err)
+	var f *os.File
+	var targetPath string
+	for counter := 0; ; counter++ {
+		if counter == 0 {
+			targetPath = filepath.Join(targetDir, filename)
+		} else {
+			targetPath = filepath.Join(targetDir, fmt.Sprintf("%s (%d)%s", base, counter, ext))
+		}
+		var err error
+		f, err = os.OpenFile(targetPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
+		if err == nil {
+			break
+		}
+		if !os.IsExist(err) {
+			return "", fmt.Errorf("gagal membuat berkas tujuan: %w", err)
+		}
+	}
+	defer f.Close()
+
+	// Stream decoder directly into file - zero 50MB+ Go slice allocation
+	if _, err := io.Copy(f, decoder); err != nil {
+		_ = os.Remove(targetPath)
+		return "", fmt.Errorf("gagal decode/menulis data: %w", err)
 	}
 
 	return targetPath, nil
@@ -195,5 +241,10 @@ func openFileInDefaultApp(filePath string) bool {
 		return true
 	}
 	return false
+}
+
+func cleanupPreviewDir() {
+	tempDir := filepath.Join(os.TempDir(), "WhatsAppDeskPreview")
+	_ = os.RemoveAll(tempDir)
 }
 

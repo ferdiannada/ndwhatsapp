@@ -81,11 +81,15 @@ func getReverseEngineeringScript() string {
 			window.WA = window.ndWA;
 
 			// Hook into WhatsApp Webpack chunk loader
+			var probeInjected = false;
 			function hookWebpack() {
+				if (window.ndWA.ready) return true;
 				if (!window.webpackChunkwhatsapp_web_client) return false;
+				if (probeInjected) return false;
 
 				var probeId = '__nd_probe_' + Date.now();
 				try {
+					probeInjected = true;
 					window.webpackChunkwhatsapp_web_client.push([
 						[probeId],
 						{},
@@ -94,53 +98,68 @@ func getReverseEngineeringScript() string {
 							var modules = require.m || {};
 							window.ndWA.rawModules = modules;
 
+							function inspectObject(m) {
+								if (!m) return;
+								// Msg module
+								if (!window.ndWA.Store.Msg) {
+									if (m.Msg) window.ndWA.Store.Msg = m.Msg;
+									else if (m.default && m.default.Msg) window.ndWA.Store.Msg = m.default.Msg;
+									else if (m.models && m.add && m.get) window.ndWA.Store.Msg = m;
+								}
+								// Chat module
+								if (!window.ndWA.Store.Chat) {
+									if (m.Chat) window.ndWA.Store.Chat = m.Chat;
+									else if (m.default && m.default.Chat) window.ndWA.Store.Chat = m.default.Chat;
+								}
+								// Contact module
+								if (!window.ndWA.Store.Contact) {
+									if (m.Contact) window.ndWA.Store.Contact = m.Contact;
+									else if (m.default && m.default.Contact) window.ndWA.Store.Contact = m.default.Contact;
+								}
+								// Conn module
+								if (!window.ndWA.Store.Conn) {
+									if (m.Conn) window.ndWA.Store.Conn = m.Conn;
+									else if (m.default && m.default.Conn) window.ndWA.Store.Conn = m.default.Conn;
+								}
+								// Socket module
+								if (!window.ndWA.Store.Socket) {
+									if (m.Socket) window.ndWA.Store.Socket = m.Socket;
+									else if (m.default && m.default.Socket) window.ndWA.Store.Socket = m.default.Socket;
+								}
+								// User module
+								if (!window.ndWA.Store.User) {
+									if (m.User) window.ndWA.Store.User = m.User;
+									else if (m.default && m.default.User) window.ndWA.Store.User = m.default.User;
+								}
+								// Cmd module
+								if (!window.ndWA.Store.Cmd) {
+									if (m.Cmd) window.ndWA.Store.Cmd = m.Cmd;
+									else if (m.default && m.default.Cmd) window.ndWA.Store.Cmd = m.default.Cmd;
+								}
+							}
+
+							// 1. First inspect already-cached modules (zero execution side-effects)
+							if (require.c) {
+								for (var cid in require.c) {
+									if (require.c[cid] && require.c[cid].exports) {
+										inspectObject(require.c[cid].exports);
+									}
+								}
+							}
+
+							// 2. Fast heuristic scan: only evaluate modules containing target keywords
 							for (var id in modules) {
+								if (window.ndWA.Store.Msg && window.ndWA.Store.Chat && window.ndWA.Store.Contact && window.ndWA.Store.Conn) {
+									break; // Early exit once core modules are located
+								}
 								try {
+									var fnStr = modules[id] ? modules[id].toString() : '';
+									if (fnStr.indexOf('Chat') === -1 && fnStr.indexOf('Msg') === -1 &&
+									    fnStr.indexOf('Conn') === -1 && fnStr.indexOf('Socket') === -1) {
+										continue; // Skip 98% of unrelated modules to prevent main thread freeze
+									}
 									var m = require(id);
-									if (!m) continue;
-
-									// Msg module
-									if (!window.ndWA.Store.Msg) {
-										if (m.Msg) window.ndWA.Store.Msg = m.Msg;
-										else if (m.default && m.default.Msg) window.ndWA.Store.Msg = m.default.Msg;
-										else if (m.models && m.add && m.get) window.ndWA.Store.Msg = m;
-									}
-
-									// Chat module
-									if (!window.ndWA.Store.Chat) {
-										if (m.Chat) window.ndWA.Store.Chat = m.Chat;
-										else if (m.default && m.default.Chat) window.ndWA.Store.Chat = m.default.Chat;
-									}
-
-									// Contact module
-									if (!window.ndWA.Store.Contact) {
-										if (m.Contact) window.ndWA.Store.Contact = m.Contact;
-										else if (m.default && m.default.Contact) window.ndWA.Store.Contact = m.default.Contact;
-									}
-
-									// Conn module
-									if (!window.ndWA.Store.Conn) {
-										if (m.Conn) window.ndWA.Store.Conn = m.Conn;
-										else if (m.default && m.default.Conn) window.ndWA.Store.Conn = m.default.Conn;
-									}
-
-									// Socket module
-									if (!window.ndWA.Store.Socket) {
-										if (m.Socket) window.ndWA.Store.Socket = m.Socket;
-										else if (m.default && m.default.Socket) window.ndWA.Store.Socket = m.default.Socket;
-									}
-
-									// User module
-									if (!window.ndWA.Store.User) {
-										if (m.User) window.ndWA.Store.User = m.User;
-										else if (m.default && m.default.User) window.ndWA.Store.User = m.default.User;
-									}
-
-									// Cmd module
-									if (!window.ndWA.Store.Cmd) {
-										if (m.Cmd) window.ndWA.Store.Cmd = m.Cmd;
-										else if (m.default && m.default.Cmd) window.ndWA.Store.Cmd = m.default.Cmd;
-									}
+									inspectObject(m);
 								} catch (err) {}
 							}
 
@@ -148,28 +167,38 @@ func getReverseEngineeringScript() string {
 							console.log('🔬 [ndWhatsApp] Webpack hooked! Modules count:', Object.keys(modules).length);
 							console.log('🔬 [ndWhatsApp] Access window.ndWA or window.WA in console');
 
-							// Attach message logger if Msg is hooked
-							if (window.ndWA.Store.Msg && typeof window.ndWA.Store.Msg.on === 'function') {
-								window.ndWA.Store.Msg.on('add', function(msg) {
-									var entry = {
-										time: new Date().toLocaleTimeString(),
-										id: msg.id ? (msg.id._serialized || msg.id.id || '') : '',
-										from: msg.from ? (msg.from._serialized || msg.from) : '',
-										type: msg.type || 'unknown',
-										body: (msg.body || msg.caption || '').slice(0, 80)
-									};
-									window.ndWA.eventLog.unshift(entry);
-									if (window.ndWA.eventLog.length > 100) window.ndWA.eventLog.pop();
+							// Attach message logger with resilient retry
+							function attachMsgListener() {
+								if (window.ndWA.Store.Msg && typeof window.ndWA.Store.Msg.on === 'function' && !window.__nd_msg_listener_attached) {
+									window.__nd_msg_listener_attached = true;
+									window.ndWA.Store.Msg.on('add', function(msg) {
+										var entry = {
+											time: new Date().toLocaleTimeString(),
+											id: msg.id ? (msg.id._serialized || msg.id.id || '') : '',
+											from: msg.from ? (msg.from._serialized || msg.from) : '',
+											type: msg.type || 'unknown',
+											body: (msg.body || msg.caption || '').slice(0, 80)
+										};
+										window.ndWA.eventLog.unshift(entry);
+										if (window.ndWA.eventLog.length > 100) window.ndWA.eventLog.pop();
 
-									var list = window.ndWA.eventListeners.message;
-									for (var l = 0; l < list.length; l++) {
-										try { list[l](msg); } catch(e){}
-									}
+										var list = window.ndWA.eventListeners.message;
+										for (var l = 0; l < list.length; l++) {
+											try { list[l](msg); } catch(e){}
+										}
 
-									if (window.ndUpdateLiveEvents) {
-										window.ndUpdateLiveEvents();
-									}
-								});
+										if (window.ndUpdateLiveEvents) {
+											window.ndUpdateLiveEvents();
+										}
+									});
+								}
+							}
+							attachMsgListener();
+							if (!window.__nd_msg_listener_attached) {
+								var msgRetry = setInterval(function() {
+									attachMsgListener();
+									if (window.__nd_msg_listener_attached) clearInterval(msgRetry);
+								}, 1500);
 							}
 
 							if (window.ndUpdateHUD) {
@@ -177,17 +206,20 @@ func getReverseEngineeringScript() string {
 							}
 						}
 					]);
-					return true;
+					return window.ndWA.ready;
 				} catch (e) {
+					probeInjected = false;
 					return false;
 				}
 			}
 
 			var hookInterval = setInterval(function() {
-				if (hookWebpack()) {
+				if (window.ndWA.ready) {
 					clearInterval(hookInterval);
+					return;
 				}
-			}, 800);
+				hookWebpack();
+			}, 600);
 
 			// Unblock Native Context Menu with Shift + Right Click
 			window.addEventListener('contextmenu', function(e) {

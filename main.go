@@ -831,8 +831,61 @@ func getInitScript(ua string) string {
 		}
 		window.showInAppDocModal = showInAppDocModal;
 
-		// Intercept URL.createObjectURL to catch decrypted PDF/document blobs directly
+		// Deduplication & Download Dispatcher (Eliminates Race Conditions across interceptors)
+		var inFlightDownloads = {};
 		var origCreateObjectURL = URL.createObjectURL;
+
+		function captureDownload(href, filename, shouldAutoOpen, directBlob) {
+			if (!filename) filename = lastClickedDocName || 'whatsapp_file';
+			var isDoc = isDocumentFileName(filename);
+			if (shouldAutoOpen === undefined) {
+				shouldAutoOpen = isDoc;
+			}
+			var now = Date.now();
+			var dedupeKey = filename + '|' + (href || '');
+			if (inFlightDownloads[dedupeKey] && (now - inFlightDownloads[dedupeKey]) < 3500) {
+				return; // Debounce duplicate triggers within 3.5s
+			}
+			inFlightDownloads[dedupeKey] = now;
+
+			showFloatingToast(isDoc ? ('📄 Opening preview: ' + filename + '...') : ('⏳ Downloading: ' + filename + '...'));
+
+			var getBlobPromise = directBlob ? Promise.resolve(directBlob) : fetch(href).then(function(res) { return res.blob(); });
+			getBlobPromise.then(function(blob) {
+				var isPdf = filename.toLowerCase().endsWith('.pdf');
+				var previewBlob = isPdf ? blob.slice(0, blob.size, 'application/pdf') : blob;
+				var ownedBlobUrl = isPdf ? origCreateObjectURL(previewBlob) : '';
+				var reader = new FileReader();
+				reader.onloadend = function() {
+					var base64data = reader.result;
+					if (window.saveDownloadedFileNative) {
+						window.saveDownloadedFileNative(filename, base64data).then(function(savedPath) {
+							if (savedPath) {
+								if (shouldAutoOpen) {
+									showInAppDocModal(filename, ownedBlobUrl || href, savedPath, base64data, ownedBlobUrl);
+									if (window.dismissStuckViewer) window.dismissStuckViewer();
+									showFloatingToast('📄 Preview opened: ' + filename);
+								} else {
+									showFloatingToast('💾 Saved successfully: ' + filename);
+								}
+							} else {
+								if (ownedBlobUrl) URL.revokeObjectURL(ownedBlobUrl);
+								showFloatingToast('❌ Failed to save file.');
+							}
+						}).catch(function() {
+							if (ownedBlobUrl) URL.revokeObjectURL(ownedBlobUrl);
+							showFloatingToast('❌ Error saving file.');
+						});
+					}
+				};
+				reader.readAsDataURL(blob);
+			}).catch(function(err) {
+				console.error('Download intercept fetch error:', err);
+			});
+		}
+		window.captureDownload = captureDownload;
+
+		// Intercept URL.createObjectURL to catch decrypted PDF/document blobs directly
 		URL.createObjectURL = function(blob) {
 			var url = origCreateObjectURL.apply(this, arguments);
 			try {
@@ -851,24 +904,7 @@ func getInitScript(ua string) string {
 						else if (bType.indexOf('word') >= 0) name += '.docx';
 						else name += '.pdf';
 					}
-					var isPdf = name.toLowerCase().endsWith('.pdf');
-					var previewBlob = isPdf ? blob.slice(0, blob.size, 'application/pdf') : blob;
-					var ownedBlobUrl = isPdf ? origCreateObjectURL(previewBlob) : '';
-					var reader = new FileReader();
-					reader.onloadend = function() {
-						var base64data = reader.result;
-						if (window.saveDownloadedFileNative) {
-							window.saveDownloadedFileNative(name, base64data).then(function(savedPath) {
-								showInAppDocModal(name, ownedBlobUrl, savedPath, base64data, ownedBlobUrl);
-								dismissStuckViewer();
-								showFloatingToast('📄 Document preview: ' + name);
-							});
-						} else {
-							showInAppDocModal(name, ownedBlobUrl, '', base64data, ownedBlobUrl);
-							dismissStuckViewer();
-						}
-					};
-					reader.readAsDataURL(blob);
+					captureDownload(url, name, true, blob);
 				}
 			} catch (e) {}
 			return url;
@@ -876,31 +912,7 @@ func getInitScript(ua string) string {
 
 		function handleBlobDocumentPreview(blobUrl) {
 			var name = lastClickedDocName || 'document.pdf';
-			fetch(blobUrl)
-				.then(function(res) { return res.blob(); })
-				.then(function(blob) {
-					var isPdf = name.toLowerCase().endsWith('.pdf');
-					var previewBlob = isPdf ? blob.slice(0, blob.size, 'application/pdf') : blob;
-					var ownedBlobUrl = isPdf ? origCreateObjectURL(previewBlob) : '';
-					var reader = new FileReader();
-					reader.onloadend = function() {
-						var base64data = reader.result;
-						if (window.saveDownloadedFileNative) {
-							window.saveDownloadedFileNative(name, base64data).then(function(savedPath) {
-								showInAppDocModal(name, ownedBlobUrl, savedPath, base64data, ownedBlobUrl);
-								dismissStuckViewer();
-								showFloatingToast('📄 Document preview: ' + name);
-							});
-						} else {
-							showInAppDocModal(name, ownedBlobUrl, '', base64data, ownedBlobUrl);
-							dismissStuckViewer();
-						}
-					};
-					reader.readAsDataURL(blob);
-				})
-				.catch(function(err) {
-					console.error('Error handling blob preview:', err);
-				});
+			captureDownload(blobUrl, name, true);
 		}
 
 		// Intercept window.open for Blob URLs (PDF/Document previews) and external URLs
@@ -1057,6 +1069,11 @@ func getInitScript(ua string) string {
 		// Always on Top Toggle (Cmd/Ctrl + Shift + T)
 		(function() {
 			var isPinnedState = false;
+			if (window.isAlwaysOnTopNative) {
+				window.isAlwaysOnTopNative().then(function(pinned) {
+					isPinnedState = !!pinned;
+				}).catch(function() {});
+			}
 			window.toggleAlwaysOnTop = function() {
 				if (window.toggleAlwaysOnTopNative) {
 					return window.toggleAlwaysOnTopNative().then(function(isPinned) {
@@ -1139,6 +1156,11 @@ func getInitScript(ua string) string {
 		// Auto-Start at Login Toggle (Cmd/Ctrl + Shift + S)
 		(function() {
 			var isAutoStartState = false;
+			if (window.isAutoStartNative) {
+				window.isAutoStartNative().then(function(enabled) {
+					isAutoStartState = !!enabled;
+				}).catch(function() {});
+			}
 			window.toggleAutoStart = function() {
 				if (window.toggleAutoStartNative) {
 					return window.toggleAutoStartNative().then(function(isEnabled) {
@@ -1197,16 +1219,18 @@ func getInitScript(ua string) string {
 			function injectResponsive() {
 				if (document.head && !document.getElementById('whatsapp-desktop-responsive')) {
 					document.head.appendChild(respStyle);
-					if (respTimer) {
-						clearInterval(respTimer);
-						respTimer = null;
-					}
+				}
+				if (document.getElementById('whatsapp-desktop-responsive') && respTimer) {
+					clearInterval(respTimer);
+					respTimer = null;
 				}
 			}
 			injectResponsive();
 			document.addEventListener('DOMContentLoaded', injectResponsive);
 			window.addEventListener('load', injectResponsive);
-			respTimer = setInterval(injectResponsive, 2500);
+			if (!document.getElementById('whatsapp-desktop-responsive')) {
+				respTimer = setInterval(injectResponsive, 1500);
+			}
 		})();
 
 		// Draggable Chat List Resizer Controller
@@ -1432,11 +1456,16 @@ func getInitScript(ua string) string {
 			injectResizerHandle();
 			document.addEventListener('DOMContentLoaded', injectResizerHandle);
 			window.addEventListener('load', injectResizerHandle);
-			setInterval(injectResizerHandle, 1500);
 
+			var resizerScheduled = false;
 			var observer = new MutationObserver(function() {
-				if (!document.getElementById('wa-side-resizer') && document.getElementById('side')) {
-					injectResizerHandle();
+				if (document.getElementById('wa-side-resizer')) return;
+				if (!resizerScheduled && document.getElementById('side')) {
+					resizerScheduled = true;
+					requestAnimationFrame(function() {
+						resizerScheduled = false;
+						injectResizerHandle();
+					});
 				}
 			});
 			if (document.body) {
@@ -1463,52 +1492,6 @@ func getInitScript(ua string) string {
 					   ext.endsWith('.xls') || ext.endsWith('.xlsx') || ext.endsWith('.ppt') ||
 					   ext.endsWith('.pptx') || ext.endsWith('.txt') || ext.endsWith('.csv') ||
 					   ext.endsWith('.rtf');
-			}
-
-			function captureDownload(href, filename, shouldAutoOpen) {
-				if (!filename) filename = 'whatsapp_file';
-				var isDoc = isDocumentFileName(filename);
-				if (shouldAutoOpen === undefined) {
-					shouldAutoOpen = isDoc;
-				}
-				showFloatingToast(isDoc ? ('📄 Opening preview: ' + filename + '...') : ('⏳ Downloading: ' + filename + '...'));
-
-				fetch(href)
-					.then(function(response) {
-						return response.blob();
-					})
-					.then(function(blob) {
-						var isPdf = filename.toLowerCase().endsWith('.pdf');
-						var previewBlob = isPdf ? blob.slice(0, blob.size, 'application/pdf') : blob;
-						var ownedBlobUrl = isPdf ? origCreateObjectURL(previewBlob) : '';
-						var reader = new FileReader();
-						reader.onloadend = function() {
-							var base64data = reader.result;
-							if (window.saveDownloadedFileNative) {
-								window.saveDownloadedFileNative(filename, base64data).then(function(savedPath) {
-									if (savedPath) {
-										if (shouldAutoOpen) {
-											showInAppDocModal(filename, ownedBlobUrl || href, savedPath, base64data, ownedBlobUrl);
-											if (window.dismissStuckViewer) window.dismissStuckViewer();
-											showFloatingToast('📄 Preview opened: ' + filename);
-										} else {
-											showFloatingToast('💾 Saved successfully: ' + filename);
-										}
-									} else {
-										if (ownedBlobUrl) URL.revokeObjectURL(ownedBlobUrl);
-										showFloatingToast('❌ Failed to save file.');
-									}
-								}).catch(function() {
-									if (ownedBlobUrl) URL.revokeObjectURL(ownedBlobUrl);
-									showFloatingToast('❌ Error saving file.');
-								});
-							}
-						};
-						reader.readAsDataURL(blob);
-					})
-					.catch(function(err) {
-						console.error('Download intercept fetch error:', err);
-					});
 			}
 
 			var forwardingDocumentDownload = false;
@@ -2200,6 +2183,18 @@ func getInitScript(ua string) string {
 						badgePin.style.color = pinActive ? accent : '#8696a0';
 						btnPin.textContent = pinActive ? 'Unpin' : 'Pin';
 					}
+					if (window.isAlwaysOnTopNative) {
+						window.isAlwaysOnTopNative().then(function(p) {
+							var b = document.getElementById('wa-badge-pin');
+							var btn = document.getElementById('wa-action-toggle-pin');
+							if (b && btn) {
+								b.textContent = p ? 'Pinned' : 'Unpinned';
+								b.style.background = p ? (isThemeDark ? 'rgba(0,168,132,0.15)' : 'rgba(0,128,105,0.15)') : 'transparent';
+								b.style.color = p ? accent : '#8696a0';
+								btn.textContent = p ? 'Unpin' : 'Pin';
+							}
+						}).catch(function() {});
+					}
 
 					var muteActive = window.isAudioMuted ? window.isAudioMuted() : false;
 					var badgeMute = document.getElementById('wa-badge-mute');
@@ -2219,6 +2214,18 @@ func getInitScript(ua string) string {
 						badgeAuto.style.background = autoActive ? (isThemeDark ? 'rgba(0,168,132,0.15)' : 'rgba(0,128,105,0.15)') : 'transparent';
 						badgeAuto.style.color = autoActive ? accent : '#8696a0';
 						btnAuto.textContent = autoActive ? 'Disable' : 'Enable';
+					}
+					if (window.isAutoStartNative) {
+						window.isAutoStartNative().then(function(a) {
+							var b = document.getElementById('wa-badge-auto');
+							var btn = document.getElementById('wa-action-toggle-auto');
+							if (b && btn) {
+								b.textContent = a ? 'Enabled' : 'Disabled';
+								b.style.background = a ? (isThemeDark ? 'rgba(0,168,132,0.15)' : 'rgba(0,128,105,0.15)') : 'transparent';
+								b.style.color = a ? accent : '#8696a0';
+								btn.textContent = a ? 'Disable' : 'Enable';
+							}
+						}).catch(function() {});
 					}
 
 					window.syncModalTheme(isThemeDark);

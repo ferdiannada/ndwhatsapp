@@ -7,9 +7,17 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
+var folderDialogLock sync.Mutex
+
 func chooseFolderDialog() (string, error) {
+	if !folderDialogLock.TryLock() {
+		return "", nil
+	}
+	defer folderDialogLock.Unlock()
+
 	// Try zenity (GNOME / Ubuntu / standard GTK desktops)
 	if path, err := exec.LookPath("zenity"); err == nil && path != "" {
 		out, err := exec.Command("zenity", "--file-selection", "--directory", "--title=Pilih Folder Penyimpanan File WhatsApp").Output()
